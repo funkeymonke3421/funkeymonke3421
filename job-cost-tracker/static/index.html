@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <title>Job Cost Tracker</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Job Cost</h1>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1c.5.4 1.1.8 1.7 1l.4 2.7h4l.4-2.7c.6-.2 1.2-.6 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <!-- LOG -->
+    <section id="view-log" class="view active" aria-labelledby="tab-log">
+      <form id="jobForm" class="card" autocomplete="off" novalidate>
+        <div class="form-head">
+          <h2 id="formTitle">Log a job</h2>
+          <button type="button" class="link-btn hidden" id="cancelEdit">Cancel edit</button>
+        </div>
+
+        <div class="row two">
+          <label>Date<input type="date" name="date" required></label>
+          <label>Job / client<input type="text" name="name" placeholder="e.g. Smith driveway" maxlength="120"></label>
+        </div>
+
+        <div class="grid-money">
+          <label>Chem<span class="money"><input type="text" inputmode="decimal" name="chem" placeholder="0.00"></span></label>
+          <label>Gas<span class="money"><input type="text" inputmode="decimal" name="gas" placeholder="0.00"></span></label>
+          <label>Ad spend<span class="money"><input type="text" inputmode="decimal" name="ad_spend" placeholder="0.00"></span></label>
+          <label>Other<span class="money"><input type="text" inputmode="decimal" name="other" placeholder="0.00"></span></label>
+        </div>
+        <label class="other-note hidden">What was "other"?<input type="text" name="other_note" maxlength="200" placeholder="e.g. tip line, parts"></label>
+
+        <div class="time-block">
+          <span class="label">Time on job</span>
+          <div class="time-row">
+            <div class="time-inputs">
+              <input type="number" inputmode="numeric" min="0" max="24" name="hours" placeholder="0" aria-label="Hours"><span>h</span>
+              <input type="number" inputmode="numeric" min="0" max="59" name="mins" placeholder="0" aria-label="Minutes"><span>m</span>
+            </div>
+            <div class="chips">
+              <button type="button" class="chip" data-add="15">+15m</button>
+              <button type="button" class="chip" data-add="30">+30m</button>
+              <button type="button" class="chip" data-add="60">+1h</button>
+              <button type="button" class="chip ghost" data-add="0">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <label>Job price <span class="muted">(optional — for profit)</span><span class="money"><input type="text" inputmode="decimal" name="revenue" placeholder="0.00"></span></label>
+
+        <details class="more">
+          <summary>Notes</summary>
+          <textarea name="notes" rows="2" maxlength="1000" placeholder="Anything worth remembering"></textarea>
+        </details>
+
+        <div class="live-total" aria-live="polite">
+          <div><span class="muted">Job cost</span><strong id="liveCost">$0.00</strong></div>
+          <div id="liveProfitWrap" class="hidden"><span class="muted">Profit</span><strong id="liveProfit">$0.00</strong></div>
+        </div>
+        <p class="muted small" id="laborHint"></p>
+
+        <p class="form-error" id="formError" role="alert"></p>
+        <button type="submit" class="primary" id="saveBtn">Save job</button>
+      </form>
+
+      <div class="today-strip card" id="todayStrip"></div>
+    </section>
+
+    <!-- DAY -->
+    <section id="view-day" class="view" aria-labelledby="tab-day">
+      <div class="day-nav">
+        <button class="icon-btn" id="prevDay" aria-label="Previous day">‹</button>
+        <input type="date" id="dayPicker">
+        <button class="icon-btn" id="nextDay" aria-label="Next day">›</button>
+      </div>
+      <div class="kpis" id="dayKpis"></div>
+      <div id="dayJobs" class="job-list"></div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section id="view-insights" class="view" aria-labelledby="tab-insights">
+      <div class="seg" role="group" aria-label="Range">
+        <button data-range="7">7 days</button>
+        <button data-range="30" class="on">30 days</button>
+        <button data-range="90">90 days</button>
+        <button data-range="365">Year</button>
+      </div>
+      <div class="kpis" id="insKpis"></div>
+      <div class="card">
+        <h3>Where the money goes</h3>
+        <div id="breakdown"></div>
+      </div>
+      <div class="card">
+        <h3>Cost per day</h3>
+        <div id="dailyChart" class="chart"></div>
+      </div>
+      <a class="secondary block" href="/api/export.csv">Export all jobs (CSV)</a>
+    </section>
+  </main>
+
+  <nav class="tabbar" role="tablist">
+    <button role="tab" id="tab-log" data-view="log" class="on">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>Log</button>
+    <button role="tab" id="tab-day" data-view="day">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z"/></svg>Day</button>
+    <button role="tab" id="tab-insights" data-view="insights">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 20h16v2H4zm1-3h3V9H5zm5.5 0h3V4h-3zM16 17h3v-6h-3z"/></svg>Insights</button>
+  </nav>
+
+  <dialog id="settingsDlg">
+    <form method="dialog" id="settingsForm">
+      <h2>Settings</h2>
+      <label>Your hourly labor rate
+        <span class="money"><input type="text" inputmode="decimal" name="hourly_rate" placeholder="0.00"></span>
+      </label>
+      <p class="muted small">Time on each job is costed at this rate. Changing it only affects jobs you log from now on.</p>
+      <div class="dlg-actions">
+        <button value="cancel" class="secondary" formnovalidate>Cancel</button>
+        <button value="save" class="primary" id="saveSettings">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
