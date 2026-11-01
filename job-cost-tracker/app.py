@@ -541,5 +541,52 @@ def create_app(db_path=None):
     return app
 
 
+def lan_ip():
+    """Best guess at this computer's address on the local network (no traffic is sent)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def already_running(port):
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def serve(open_browser=False):
+    import threading
+    import webbrowser
+
+    port = int(os.environ.get("PORT", 5000))
+    url = f"http://localhost:{port}"
+    if already_running(port):
+        print(f"Job Cost is already running at {url}")
+        if open_browser:
+            webbrowser.open(url)
+        return
+
+    app = create_app()
+    print(f"\n  Job Cost is running.\n  On this computer:  {url}")
+    ip = lan_ip()
+    if ip:
+        print(f"  On your phone:     http://{ip}:{port}   (same Wi-Fi)")
+    print("\n  Press Ctrl+C or close this window to stop.\n")
+    if open_browser:
+        threading.Timer(1.0, webbrowser.open, [url]).start()
+    try:
+        from waitress import serve as waitress_serve
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, debug=False)
+    else:
+        waitress_serve(app, host="0.0.0.0", port=port, threads=8)
+
+
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    import sys
+    serve(open_browser="--open" in sys.argv[1:])
