@@ -498,7 +498,65 @@ const CATS = [
   ["other", "Other", "--c-other"],
 ];
 
+/* Weekly view: Monday through today, compared with the same days last week,
+   so a Wednesday is never judged against a whole week. */
+async function loadWeek() {
+  const today = localISO();
+  const dow = (new Date(today + "T12:00:00").getDay() + 6) % 7;  // Monday = 0
+  const start = shiftDay(today, -dow);
+  const [now, was] = await Promise.all([
+    api(`/api/summary?start=${start}&end=${today}`),
+    api(`/api/summary?start=${shiftDay(start, -7)}&end=${shiftDay(today, -7)}`),
+  ]);
+  const short = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  $("#weekRange").textContent = dow ? `${short(start)} – ${short(today)} vs same days last week` : `${short(today)} vs last Monday`;
+
+  const a = now.totals, b = was.totals;
+  // [label, key, formatter, which direction is good: 1 = up, -1 = down, 0 = neutral]
+  const rows = [
+    ["Jobs", "jobs", (v) => v, 1],
+    ["Revenue", "revenue", money, 1],
+    ["Total cost", "total_cost", money, -1],
+    ["Profit", "profit", money, 1],
+    ["Cost / job", "avg_cost_per_job", money, -1],
+    ["Time", "minutes", hm, 0],
+  ].filter(([, k]) => k !== "revenue" && k !== "profit" || a.revenue || b.revenue);
+
+  const delta = (x, y, good) => {
+    if (x === y) return `<span class="delta flat">same</span>`;
+    if (!y) return `<span class="delta flat">new</span>`;
+    const pct = Math.round(((x - y) / Math.abs(y)) * 100);
+    const better = good === 0 ? null : (x > y) === (good > 0);
+    const cls = better === null ? "flat" : better ? "pos" : "neg";
+    return `<span class="delta ${cls}">${x > y ? "▲" : "▼"} ${Math.abs(pct)}%</span>`;
+  };
+
+  if (!a.jobs && !b.jobs) {
+    $("#weekCompare").innerHTML = `<div class="empty">No jobs this week or the same days last week yet.</div>`;
+    return;
+  }
+  $("#weekCompare").innerHTML = `
+    <div class="wk">
+      <span class="hd"></span><span class="hd">This wk</span><span class="hd">Last wk</span><span class="hd">Change</span>
+      ${rows.map(([label, k, f, good]) => `
+        <span>${label}</span><span class="now">${f(a[k])}</span><span class="was">${f(b[k])}</span>${delta(a[k], b[k], good)}`).join("")}
+    </div>` + bestType(now.by_type);
+}
+
+function bestType(types) {
+  const real = types.filter((t) => t.id !== null);
+  if (!real.length) return "";
+  const withRev = real.filter((t) => t.revenue);
+  if (withRev.length) {
+    const t = withRev.reduce((m, x) => (x.profit > m.profit ? x : m));
+    return `<p class="week-best">Best earner this week: <b>${esc(t.name)}</b>, ${money(t.profit)} profit from ${plural(t.jobs, "job")}.</p>`;
+  }
+  const t = real.reduce((m, x) => (x.jobs > m.jobs ? x : m));
+  return `<p class="week-best">Most common this week: <b>${esc(t.name)}</b>, ${plural(t.jobs, "job")}.</p>`;
+}
+
 async function loadInsights() {
+  loadWeek();
   const end = localISO();
   const start = shiftDay(end, -(state.range - 1));
   const s = await api(`/api/summary?start=${start}&end=${end}`);
