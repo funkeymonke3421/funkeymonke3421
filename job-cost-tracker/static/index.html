@@ -10,9 +10,6 @@
 <body>
   <header class="topbar">
     <h1>Job Cost</h1>
-    <button class="icon-btn" id="settingsBtn" aria-label="Settings">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3.3h-4l-.4 2.7a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1c.5.4 1.1.8 1.7 1l.4 2.7h4l.4-2.7c.6-.2 1.2-.6 1.7-1l2.5 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
-    </button>
   </header>
 
   <main>
@@ -29,13 +26,21 @@
           <label>Job / client<input type="text" name="name" placeholder="e.g. Smith driveway" maxlength="120"></label>
         </div>
 
-        <div class="grid-money">
-          <label>Chem<span class="money"><input type="text" inputmode="decimal" name="chem" placeholder="0.00"></span></label>
-          <label>Gas<span class="money"><input type="text" inputmode="decimal" name="gas" placeholder="0.00"></span></label>
-          <label>Ad spend<span class="money"><input type="text" inputmode="decimal" name="ad_spend" placeholder="0.00"></span></label>
-          <label>Other<span class="money"><input type="text" inputmode="decimal" name="other" placeholder="0.00"></span></label>
+        <div class="field">
+          <span class="label">Job type <span class="muted">(pick all that apply)</span></span>
+          <div class="type-picker" id="typePicker" role="group" aria-label="Job types"></div>
         </div>
-        <label class="other-note hidden">What was "other"?<input type="text" name="other_note" maxlength="200" placeholder="e.g. tip line, parts"></label>
+
+        <div class="grid-money">
+          <label>Chem used
+            <span class="unit"><input type="text" inputmode="decimal" name="chem_gallons" placeholder="0"><em>gal</em></span>
+            <small class="calc" id="chemCalc"></small>
+          </label>
+          <label>Miles driven
+            <span class="unit"><input type="text" inputmode="decimal" name="miles" placeholder="0"><em>mi</em></span>
+            <small class="calc" id="gasCalc"></small>
+          </label>
+        </div>
 
         <div class="time-block">
           <span class="label">Time on job</span>
@@ -53,18 +58,25 @@
           </div>
         </div>
 
-        <label>Job price <span class="muted">(optional — for profit)</span><span class="money"><input type="text" inputmode="decimal" name="revenue" placeholder="0.00"></span></label>
+        <label>Job price <span class="muted">(optional, for profit)</span><span class="money"><input type="text" inputmode="decimal" name="revenue" placeholder="0.00"></span></label>
 
-        <details class="more">
-          <summary>Notes</summary>
-          <textarea name="notes" rows="2" maxlength="1000" placeholder="Anything worth remembering"></textarea>
+        <details class="more" id="moreCosts">
+          <summary>Other costs &amp; notes</summary>
+          <div class="grid-money">
+            <label>Other expense<span class="money"><input type="text" inputmode="decimal" name="other" placeholder="0.00"></span></label>
+            <label>Extra ad / lead cost<span class="money"><input type="text" inputmode="decimal" name="ad_extra" placeholder="0.00"></span></label>
+            <label class="legacy hidden">Chem $ (manual)<span class="money"><input type="text" inputmode="decimal" name="chem_extra" placeholder="0.00"></span></label>
+            <label class="legacy hidden">Gas $ (manual)<span class="money"><input type="text" inputmode="decimal" name="gas_extra" placeholder="0.00"></span></label>
+          </div>
+          <label class="other-note hidden">What was "other"?<input type="text" name="other_note" maxlength="200" placeholder="e.g. parts, dump fee"></label>
+          <label>Notes<textarea name="notes" rows="2" maxlength="1000" placeholder="Anything worth remembering"></textarea></label>
         </details>
 
         <div class="live-total" aria-live="polite">
           <div><span class="muted">Job cost</span><strong id="liveCost">$0.00</strong></div>
           <div id="liveProfitWrap" class="hidden"><span class="muted">Profit</span><strong id="liveProfit">$0.00</strong></div>
         </div>
-        <p class="muted small" id="laborHint"></p>
+        <p class="muted small" id="liveBreakdown"></p>
 
         <p class="form-error" id="formError" role="alert"></p>
         <button type="submit" class="primary" id="saveBtn">Save job</button>
@@ -81,6 +93,16 @@
         <button class="icon-btn" id="nextDay" aria-label="Next day">›</button>
       </div>
       <div class="kpis" id="dayKpis"></div>
+      <form class="card ad-day hidden" id="adDayForm">
+        <div>
+          <span class="label">Ad spend this day</span>
+          <span class="muted small" id="adDayHint"></span>
+        </div>
+        <div class="inline">
+          <span class="money"><input type="text" inputmode="decimal" name="ad_per_day" aria-label="Ad spend this day"></span>
+          <button class="secondary" type="submit">Save</button>
+        </div>
+      </form>
       <div id="dayJobs" class="job-list"></div>
     </section>
 
@@ -98,10 +120,62 @@
         <div id="breakdown"></div>
       </div>
       <div class="card">
+        <h3>By job type</h3>
+        <div id="byType"></div>
+      </div>
+      <div class="card">
         <h3>Cost per day</h3>
         <div id="dailyChart" class="chart"></div>
       </div>
       <a class="secondary block" href="/api/export.csv">Export all jobs (CSV)</a>
+    </section>
+
+    <!-- SETUP -->
+    <section id="view-setup" class="view" aria-labelledby="tab-setup">
+      <div class="card">
+        <h3>Job types</h3>
+        <div class="type-list" id="typeList"></div>
+        <form class="inline" id="addTypeForm">
+          <input type="text" name="name" maxlength="40" placeholder="Add a type, e.g. House wash" aria-label="New job type">
+          <button class="secondary" type="submit">Add</button>
+        </form>
+      </div>
+
+      <form id="ratesForm" novalidate>
+        <div class="card">
+          <h3>Chemicals</h3>
+          <label>Chem cost per gallon (mixed)<span class="money"><input type="text" inputmode="decimal" name="chem_price" placeholder="0.00"></span></label>
+        </div>
+        <div class="card">
+          <h3>Driving</h3>
+          <div class="grid-money">
+            <label>Gas price / gallon<span class="money"><input type="text" inputmode="decimal" name="gas_price" placeholder="0.00"></span></label>
+            <label>Truck MPG<span class="unit"><input type="text" inputmode="decimal" name="mpg" placeholder="0"><em>mpg</em></span></label>
+          </div>
+          <label>Usual miles between jobs<span class="unit"><input type="text" inputmode="decimal" name="default_miles" placeholder="0"><em>mi</em></span>
+            <small class="calc">Fills in the miles on each new job. You can change it per job.</small></label>
+          <p class="muted small" id="perMile"></p>
+        </div>
+        <div class="card">
+          <h3>Time</h3>
+          <div class="grid-money">
+            <label>Your hourly rate<span class="money"><input type="text" inputmode="decimal" name="hourly_rate" placeholder="0.00"></span></label>
+            <label>Equipment wear / hour<span class="money"><input type="text" inputmode="decimal" name="equip_rate" placeholder="0.00"></span></label>
+          </div>
+          <p class="muted small">Equipment wear covers things like pump, hose and surface-cleaner upkeep for each hour you run.</p>
+        </div>
+        <div class="card">
+          <h3>Business costs</h3>
+          <div class="grid-money">
+            <label>Ad spend per day<span class="money"><input type="text" inputmode="decimal" name="ad_per_day" placeholder="0.00"></span></label>
+            <label>Overhead per job<span class="money"><input type="text" inputmode="decimal" name="overhead_per_job" placeholder="0.00"></span></label>
+          </div>
+          <p class="muted small">Daily ad spend is split evenly across the jobs you do that day. Overhead per job covers things like insurance, software and phone.</p>
+        </div>
+        <p class="form-error" id="ratesError" role="alert"></p>
+        <button class="primary" type="submit">Save setup</button>
+        <p class="muted small center">New rates apply to jobs you log from now on. Past jobs keep the rates they were logged with.</p>
+      </form>
     </section>
   </main>
 
@@ -112,21 +186,9 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z"/></svg>Day</button>
     <button role="tab" id="tab-insights" data-view="insights">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 20h16v2H4zm1-3h3V9H5zm5.5 0h3V4h-3zM16 17h3v-6h-3z"/></svg>Insights</button>
+    <button role="tab" id="tab-setup" data-view="setup">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17v2h6v-2zm0-12v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z"/></svg>Setup</button>
   </nav>
-
-  <dialog id="settingsDlg">
-    <form method="dialog" id="settingsForm">
-      <h2>Settings</h2>
-      <label>Your hourly labor rate
-        <span class="money"><input type="text" inputmode="decimal" name="hourly_rate" placeholder="0.00"></span>
-      </label>
-      <p class="muted small">Time on each job is costed at this rate. Changing it only affects jobs you log from now on.</p>
-      <div class="dlg-actions">
-        <button value="cancel" class="secondary" formnovalidate>Cancel</button>
-        <button value="save" class="primary" id="saveSettings">Save</button>
-      </div>
-    </form>
-  </dialog>
 
   <div class="toast" id="toast" role="status"></div>
   <script src="/static/app.js"></script>

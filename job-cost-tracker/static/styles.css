@@ -15,6 +15,8 @@
   --c-ad: #6d4fd8;
   --c-other: #7c8a87;
   --c-labor: #2f6fdb;
+  --c-equip: #b4547a;
+  --c-overhead: #8a6d1f;
   --radius: 14px;
   --shadow: 0 1px 2px rgba(16, 24, 22, .06), 0 4px 16px rgba(16, 24, 22, .05);
   color-scheme: light;
@@ -37,6 +39,8 @@
     --c-ad: #9b87f5;
     --c-other: #8f9d9a;
     --c-labor: #5b93f0;
+    --c-equip: #e07ba3;
+    --c-overhead: #c9a43c;
     --shadow: none;
     color-scheme: dark;
   }
@@ -224,15 +228,7 @@ a.secondary.block { display: block; text-align: center; text-decoration: none; m
 .tabbar svg { width: 24px; height: 24px; }
 .tabbar button.on { color: var(--accent); }
 
-/* ---- dialog + toast ---- */
-dialog {
-  border: 0; border-radius: 18px; padding: 20px; width: min(92vw, 400px);
-  background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.25);
-}
-dialog::backdrop { background: rgba(10, 16, 15, .45); }
-dialog h2 { margin-bottom: 14px; }
-.dlg-actions { display: flex; gap: 10px; margin-top: 16px; }
-
+/* ---- toast ---- */
 .toast {
   position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom));
   transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
@@ -241,3 +237,61 @@ dialog h2 { margin-bottom: 14px; }
   transition: opacity .2s, transform .2s; z-index: 20; white-space: nowrap;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---- v2: job types, unit inputs, setup ---- */
+.center { text-align: center; }
+.field { margin-bottom: 12px; }
+.type-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.type-picker button {
+  font: inherit; font-size: .92rem; font-weight: 600; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--text);
+  border-radius: 999px; padding: 8px 14px; transition: background .12s, border-color .12s, color .12s;
+}
+.type-picker button[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.type-picker button[aria-pressed="true"]::before { content: "✓ "; }
+.type-picker .empty-types { color: var(--muted); font-size: .9rem; }
+.type-picker .empty-types a { color: var(--accent); font-weight: 600; }
+
+.unit { position: relative; display: block; }
+.unit input { padding-right: 46px; font-variant-numeric: tabular-nums; }
+.unit em {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-38%);
+  font-style: normal; color: var(--muted); font-weight: 500; pointer-events: none;
+}
+.calc { display: block; min-height: 1.2em; margin-top: 4px; font-weight: 500; color: var(--muted); font-size: .8rem; }
+.calc b { color: var(--text); }
+
+.inline { display: flex; gap: 8px; align-items: center; }
+.inline input { margin: 0; }
+.inline .money { flex: 1; }
+.inline .secondary { width: auto; padding: 11px 18px; }
+.inline > input { flex: 1; }
+
+.type-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.type-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: .92rem;
+  border-radius: 999px; padding: 6px 6px 6px 14px;
+}
+.type-tag button {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  width: 26px; height: 26px; border-radius: 50%; font-size: 1rem; line-height: 1;
+}
+.type-tag button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#ratesForm .card label:last-child { margin-bottom: 0; }
+
+.ad-day { display: flex; flex-direction: column; gap: 8px; }
+.ad-day .small { display: block; margin: 2px 0 0; }
+
+.job-types { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.job-types span {
+  background: var(--accent-soft); color: var(--accent);
+  font-size: .75rem; font-weight: 700; border-radius: 6px; padding: 2px 8px;
+}
+.type-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.type-row:first-child { border-top: 0; padding-top: 0; }
+.type-row .nm { font-weight: 700; }
+.type-row .amt { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.type-row .sub { grid-column: 1 / -1; color: var(--muted); font-size: .85rem; }
