@@ -353,18 +353,46 @@ def create_app(db_path=None):
         return "", 204
 
     # --- job types ---
-    def active_types():
-        rows = get_db().execute(
-            "SELECT id, name FROM job_types WHERE archived = 0 ORDER BY name COLLATE NOCASE")
-        return [dict(r) for r in rows]
+    TYPE_COLS = "id, name, default_gal_x100, default_minutes, default_revenue_cents"
 
-    def clean_type_name(payload):
-        name = str((payload or {}).get("name") or "").strip()
-        if not name:
-            raise ValidationError("name is required")
-        if len(name) > 40:
-            raise ValidationError("name must be 40 characters or fewer")
-        return name
+    def type_to_dict(r):
+        return {"id": r["id"], "name": r["name"],
+                "default_gallons": unscale(r["default_gal_x100"]),
+                "default_minutes": r["default_minutes"],
+                "default_price": unscale(r["default_revenue_cents"])}
+
+    def active_types():
+        rows = get_db().execute(f"SELECT {TYPE_COLS} FROM job_types WHERE archived = 0 "
+                                "ORDER BY name COLLATE NOCASE")
+        return [type_to_dict(r) for r in rows]
+
+    def get_type(type_id):
+        r = get_db().execute(f"SELECT {TYPE_COLS} FROM job_types WHERE id = ?", (type_id,)).fetchone()
+        return type_to_dict(r) if r else None
+
+    def parse_type(payload, partial=False):
+        if not isinstance(payload, dict):
+            raise ValidationError("expected a JSON object")
+        out = {}
+        if "name" in payload or not partial:
+            name = str(payload.get("name") or "").strip()
+            if not name:
+                raise ValidationError("name is required")
+            if len(name) > 40:
+                raise ValidationError("name must be 40 characters or fewer")
+            out["name"] = name
+        if "default_gallons" in payload:
+            out["default_gal_x100"] = to_scaled(payload["default_gallons"], "usual chem", 100, 10_000)
+        if "default_minutes" in payload:
+            out["default_minutes"] = to_minutes(payload["default_minutes"])
+        if "default_price" in payload:
+            out["default_revenue_cents"] = to_cents(payload["default_price"], "usual price")
+        return out
+
+    def name_taken(name, exclude_id=None):
+        return get_db().execute(
+            "SELECT 1 FROM job_types WHERE name = ? COLLATE NOCASE AND archived = 0 AND id != ?",
+            (name, exclude_id or -1)).fetchone() is not None
 
     @app.get("/api/job-types")
     def list_types():
@@ -372,36 +400,41 @@ def create_app(db_path=None):
 
     @app.post("/api/job-types")
     def create_type():
-        name = clean_type_name(request.get_json(silent=True))
+        data = parse_type(request.get_json(silent=True))
+        name = data["name"]
+        if name_taken(name):
+            raise ValidationError(f'"{name}" already exists')
         conn = get_db()
-        existing = conn.execute(
-            "SELECT id, archived FROM job_types WHERE name = ? COLLATE NOCASE "
-            "ORDER BY archived LIMIT 1", (name,)).fetchone()
+        archived = conn.execute(
+            "SELECT id FROM job_types WHERE name = ? COLLATE NOCASE AND archived = 1 LIMIT 1",
+            (name,)).fetchone()
         with conn:
-            if existing and not existing["archived"]:
-                raise ValidationError(f'"{name}" already exists')
-            if existing:  # bring back an archived type so its history stays together
-                conn.execute("UPDATE job_types SET archived = 0, name = ? WHERE id = ?",
-                             (name, existing["id"]))
-                type_id = existing["id"]
+            if archived:  # bring back an archived type so its history stays together
+                type_id = archived["id"]
+                sets = ", ".join(f"{c} = ?" for c in data)
+                conn.execute(f"UPDATE job_types SET archived = 0, {sets} WHERE id = ?",
+                             [*data.values(), type_id])
             else:
-                type_id = conn.execute("INSERT INTO job_types (name) VALUES (?)", (name,)).lastrowid
-        return jsonify(id=type_id, name=name), 201
+                cols = ", ".join(data)
+                marks = ", ".join("?" for _ in data)
+                type_id = conn.execute(f"INSERT INTO job_types ({cols}) VALUES ({marks})",
+                                       list(data.values())).lastrowid
+        return jsonify(get_type(type_id)), 201
 
     @app.put("/api/job-types/<int:type_id>")
-    def rename_type(type_id):
-        name = clean_type_name(request.get_json(silent=True))
+    def update_type(type_id):
+        data = parse_type(request.get_json(silent=True), partial=True)
+        if not data:
+            raise ValidationError("nothing to update")
+        if "name" in data and name_taken(data["name"], type_id):
+            raise ValidationError(f'"{data["name"]}" already exists')
         conn = get_db()
-        clash = conn.execute(
-            "SELECT 1 FROM job_types WHERE name = ? COLLATE NOCASE AND archived = 0 AND id != ?",
-            (name, type_id)).fetchone()
-        if clash:
-            raise ValidationError(f'"{name}" already exists')
         with conn:
-            cur = conn.execute("UPDATE job_types SET name = ? WHERE id = ?", (name, type_id))
+            sets = ", ".join(f"{c} = ?" for c in data)
+            cur = conn.execute(f"UPDATE job_types SET {sets} WHERE id = ?", [*data.values(), type_id])
         if cur.rowcount == 0:
             return jsonify(error="not found"), 404
-        return jsonify(id=type_id, name=name)
+        return jsonify(get_type(type_id))
 
     @app.delete("/api/job-types/<int:type_id>")
     def archive_type(type_id):

@@ -166,7 +166,7 @@ def test_v1_database_upgrades_and_keeps_old_jobs(tmp_path):
     c = create_app(path).test_client()
     j = c.get("/api/jobs").get_json()[0]
     assert (j["chem"], j["gas"], j["ad_spend"], j["labor"], j["total_cost"]) == (10, 5, 2, 20, 37)
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == 2
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
 
 
 def test_csv_export(client):
@@ -180,3 +180,19 @@ def test_csv_export(client):
 
 def test_index_served(client):
     assert b"Job Cost" in client.get("/").data
+
+
+def test_job_type_defaults(client):
+    r = client.post("/api/job-types", json={"name": "House wash", "default_gallons": "6",
+                                            "default_minutes": 120, "default_price": "450"})
+    assert r.status_code == 201
+    t = r.get_json()
+    assert (t["default_gallons"], t["default_minutes"], t["default_price"]) == (6.0, 120, 450.0)
+    t = client.put(f"/api/job-types/{t['id']}", json={"default_price": 500}).get_json()
+    assert t["default_price"] == 500.0 and t["name"] == "House wash" and t["default_gallons"] == 6.0
+    t = client.put(f"/api/job-types/{t['id']}", json={"name": "Wash"}).get_json()
+    assert t["name"] == "Wash"
+    assert client.put(f"/api/job-types/{t['id']}", json={"default_minutes": 9999}).status_code == 400
+    assert client.put("/api/job-types/999", json={"name": "x"}).status_code == 404
+    other = client.post("/api/job-types", json={"name": "Roof"}).get_json()
+    assert client.put(f"/api/job-types/{other['id']}", json={"name": "wash"}).status_code == 400

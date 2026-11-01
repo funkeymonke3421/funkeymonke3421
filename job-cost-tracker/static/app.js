@@ -57,6 +57,7 @@ const state = {
   settings: {},
   types: [],            // active job types
   selected: new Set(),  // type ids picked on the form
+  auto: { gal: 0, minutes: 0, price: 0 },  // last values filled from type defaults
   editing: null,        // job being edited
   day: localISO(),
   range: 30,
@@ -113,7 +114,31 @@ $("#typePicker").addEventListener("click", (e) => {
   const id = +b.dataset.id;
   state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
   b.setAttribute("aria-pressed", state.selected.has(id));
+  applyTypeDefaults();
 });
+
+// Fill chem, time and price from the picked types' usual amounts (summed when
+// several are picked). A field is only changed if it still holds the last
+// auto-filled value, so anything you typed yourself is never overwritten.
+function applyTypeDefaults() {
+  const picked = state.types.filter((t) => state.selected.has(t.id));
+  const next = {
+    gal: round2(picked.reduce((a, t) => a + t.default_gallons, 0)),
+    minutes: picked.reduce((a, t) => a + t.default_minutes, 0),
+    price: round2(picked.reduce((a, t) => a + t.default_price, 0)),
+  };
+  const prev = state.auto;
+  const set = (el, val, text) => { el.value = text; el.classList.toggle("autofilled", !!val); };
+  if (num(f("chem_gallons").value) === prev.gal) set(f("chem_gallons"), next.gal, blank(next.gal));
+  if (num(f("revenue").value) === prev.price) set(f("revenue"), next.price, next.price ? next.price.toFixed(2) : "");
+  if (formMinutes() === prev.minutes) {
+    setMinutes(next.minutes);
+    f("hours").classList.toggle("autofilled", !!next.minutes);
+    f("mins").classList.toggle("autofilled", !!next.minutes);
+  }
+  state.auto = next;
+  updateLive();
+}
 
 function liveCosts() {
   const r = rates();
@@ -168,6 +193,7 @@ function updateLive() {
 }
 form.addEventListener("input", (e) => {
   e.target.removeAttribute("aria-invalid");
+  e.target.classList.remove("autofilled");
   $("#formError").textContent = "";
   updateLive();
 });
@@ -185,6 +211,8 @@ function resetForm(keepDate = true) {
   f("miles").value = blank(state.settings.default_miles, 1);
   state.editing = null;
   state.selected = new Set();
+  state.auto = { gal: 0, minutes: 0, price: 0 };
+  $$(".autofilled", form).forEach((el) => el.classList.remove("autofilled"));
   $("#formTitle").textContent = "Log a job";
   $("#saveBtn").textContent = "Save job";
   $("#cancelEdit").classList.add("hidden");
@@ -259,6 +287,7 @@ $("#cancelEdit").addEventListener("click", () => { resetForm(false); loadTodaySt
 function editJob(job) {
   state.editing = job;
   state.selected = new Set(job.types.map((t) => t.id));
+  state.auto = { gal: NaN, minutes: NaN, price: NaN };  // never auto-change a saved job's numbers
   for (const k of ["date", "name", "other_note", "notes"]) f(k).value = job[k] || "";
   f("revenue").value = blank(job.revenue);
   f("other").value = blank(job.other);
@@ -470,10 +499,43 @@ $$(".seg button").forEach((b) => b.addEventListener("click", () => {
 const ratesForm = $("#ratesForm");
 const RATE_DIGITS = { mpg: 1, default_miles: 1 };
 
-function renderTypeList() {
-  $("#typeList").innerHTML = state.types.length
-    ? state.types.map((t) => `<span class="type-tag">${esc(t.name)}<button type="button" data-id="${t.id}" aria-label="Remove ${esc(t.name)}">×</button></span>`).join("")
-    : `<span class="muted small">Add the kinds of work you do. You'll tap them on each job.</span>`;
+function typeSummary(t) {
+  const bits = [
+    t.default_gallons && `${t.default_gallons} gal`,
+    t.default_minutes && hm(t.default_minutes),
+    t.default_price && money(t.default_price),
+  ].filter(Boolean);
+  return bits.join(" · ") || "No defaults yet";
+}
+
+function renderTypeList(openId = null) {
+  const list = $("#typeList");
+  if (!state.types.length) {
+    list.innerHTML = `<span class="muted small">Add the kinds of work you do. You'll tap them on each job.</span>`;
+    return;
+  }
+  list.innerHTML = state.types.map((t) => `
+    <div class="type-item${t.id === openId ? " open" : ""}" data-id="${t.id}">
+      <button type="button" class="type-head" data-act="toggle" aria-expanded="${t.id === openId}">
+        <span class="nm">${esc(t.name)}</span><span class="def">${esc(typeSummary(t))}</span><span class="chev">›</span>
+      </button>
+      <form class="type-edit${t.id === openId ? "" : " hidden"}" novalidate>
+        <label>Name<input type="text" name="name" maxlength="40" value="${esc(t.name)}"></label>
+        <div class="grid-money">
+          <label>Usual chem<span class="unit"><input type="text" inputmode="decimal" name="default_gallons" value="${blank(t.default_gallons)}" placeholder="0"><em>gal</em></span></label>
+          <label>Usual price<span class="money"><input type="text" inputmode="decimal" name="default_price" value="${t.default_price ? t.default_price.toFixed(2) : ""}" placeholder="0.00"></span></label>
+        </div>
+        <span class="label">Usual time</span>
+        <div class="time-inputs">
+          <input type="number" inputmode="numeric" min="0" max="24" name="hours" value="${t.default_minutes >= 60 ? Math.floor(t.default_minutes / 60) : ""}" placeholder="0" aria-label="Hours"><span>h</span>
+          <input type="number" inputmode="numeric" min="0" max="59" name="mins" value="${t.default_minutes % 60 || ""}" placeholder="0" aria-label="Minutes"><span>m</span>
+        </div>
+        <div class="type-actions">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" class="danger-link" data-act="remove">Remove</button>
+        </div>
+      </form>
+    </div>`).join("");
 }
 
 function updatePerMile() {
@@ -523,25 +585,59 @@ $("#addTypeForm").addEventListener("submit", async (e) => {
   const name = input.value.trim();
   if (!name) return;
   try {
-    await api("/api/job-types", { method: "POST", body: { name } });
+    const t = await api("/api/job-types", { method: "POST", body: { name } });
     input.value = "";
-    await refreshTypes();
-    toast(`Added "${name}"`);
+    await refreshTypes(t.id);
+    toast(`Added "${name}". Set its usual amounts below.`);
   } catch (ex) { toast(ex.message); }
 });
+
 $("#typeList").addEventListener("click", async (e) => {
-  const b = e.target.closest("button[data-id]");
-  if (!b) return;
-  const t = state.types.find((x) => x.id === +b.dataset.id);
-  if (!confirm(`Remove "${t.name}" from the list? Past jobs keep it.`)) return;
-  await api(`/api/job-types/${t.id}`, { method: "DELETE" });
-  state.selected.delete(t.id);
-  await refreshTypes();
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const item = btn.closest(".type-item");
+  const t = state.types.find((x) => x.id === +item.dataset.id);
+  if (btn.dataset.act === "toggle") {
+    const open = !item.classList.contains("open");
+    $$(".type-item", $("#typeList")).forEach((el) => {
+      const on = open && el === item;
+      el.classList.toggle("open", on);
+      el.querySelector(".type-edit").classList.toggle("hidden", !on);
+      el.querySelector(".type-head").setAttribute("aria-expanded", on);
+    });
+  }
+  if (btn.dataset.act === "remove") {
+    if (!confirm(`Remove "${t.name}" from the list? Past jobs keep it.`)) return;
+    await api(`/api/job-types/${t.id}`, { method: "DELETE" });
+    state.selected.delete(t.id);
+    await refreshTypes();
+  }
 });
 
-async function refreshTypes() {
+$("#typeList").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fm = e.target;
+  const id = +fm.closest(".type-item").dataset.id;
+  const el = fm.elements;
+  for (const k of ["default_gallons", "default_price"]) {
+    const v = el[k].value.trim();
+    if (v && !/^\$?\s*[\d,]*\.?\d*$/.test(v)) { el[k].setAttribute("aria-invalid", "true"); el[k].focus(); return; }
+  }
+  try {
+    await api(`/api/job-types/${id}`, { method: "PUT", body: {
+      name: el.name.value,
+      default_gallons: el.default_gallons.value || 0,
+      default_price: el.default_price.value || 0,
+      default_minutes: Math.round(num(el.hours.value) * 60 + num(el.mins.value)),
+    } });
+    await refreshTypes();
+    toast("Job type saved");
+  } catch (ex) { toast(ex.message); }
+});
+
+async function refreshTypes(openId = null) {
   state.types = await api("/api/job-types");
-  renderTypeList();
+  renderTypeList(openId);
   renderTypePicker();
 }
 

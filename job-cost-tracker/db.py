@@ -74,6 +74,12 @@ MIGRATIONS = [
         ('equip_rate_cents', '0'),
         ('overhead_cents', '0');
     """,
+    # v3: usual amounts per job type, used to pre-fill the form.
+    """
+    ALTER TABLE job_types ADD COLUMN default_gal_x100      INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE job_types ADD COLUMN default_minutes       INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE job_types ADD COLUMN default_revenue_cents INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
