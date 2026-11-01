@@ -80,6 +80,13 @@ MIGRATIONS = [
     ALTER TABLE job_types ADD COLUMN default_minutes       INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE job_types ADD COLUMN default_revenue_cents INTEGER NOT NULL DEFAULT 0;
     """,
+    # v4: login password hash and session signing key.
+    """
+    CREATE TABLE app_secrets (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
 ]
 
 

@@ -7,10 +7,16 @@ Data: ./data/jobs.db       (override with JOBCOST_DB=/path/to/file.db)
 import csv
 import io
 import os
+import secrets
+import threading
+import time
 from datetime import date, datetime, timedelta
+from urllib.parse import urlparse
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory
+from flask import (Flask, Response, g, jsonify, redirect, request, send_from_directory,
+                   session)
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
 
@@ -53,6 +59,10 @@ SNAPSHOT = {
 }
 
 MAX_MONEY = 1_000_000
+MIN_PASSWORD = 8
+LOGIN_WINDOW = 15 * 60       # seconds
+LOGIN_MAX_FAILS = 5          # per address per window
+LOGIN_MAX_FAILS_TOTAL = 50   # across all addresses per window
 MAX_MINUTES = 24 * 60
 COST_KEYS = ("chem", "gas", "labor", "equipment", "ad_spend", "overhead", "other")
 SUM_KEYS = ("revenue", *COST_KEYS, "total_cost", "profit")
@@ -138,14 +148,52 @@ def add_to_totals(t, job):
 
 # ---------- app ----------
 
-def create_app(db_path=None):
+def get_secret(conn, key):
+    row = conn.execute("SELECT value FROM app_secrets WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_secret(conn, key, value):
+    with conn:
+        if value is None:
+            conn.execute("DELETE FROM app_secrets WHERE key = ?", (key,))
+        else:
+            conn.execute("INSERT INTO app_secrets (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+
+def store_password(conn, password):
+    """Save a new password. Changing it also signs out every other device."""
+    set_secret(conn, "password_hash", generate_password_hash(password) if password else None)
+    set_secret(conn, "session_version", secrets.token_hex(8))
+
+
+def create_app(db_path=None, require_password=None):
     app = Flask(__name__, static_folder="static", static_url_path="/static")
     app.config["DB_PATH"] = db_path or os.environ.get(
         "JOBCOST_DB", os.path.join(os.path.dirname(__file__), "data", "jobs.db"))
+    if require_password is None:
+        require_password = os.environ.get("JOBCOST_REQUIRE_PASSWORD") == "1"
+    app.config["REQUIRE_PASSWORD"] = require_password
 
     conn = db.connect(app.config["DB_PATH"])
     db.migrate(conn)
+    key = get_secret(conn, "secret_key")
+    if not key:
+        key = secrets.token_hex(32)
+        set_secret(conn, "secret_key", key)
     conn.close()
+
+    app.secret_key = key
+    app.config.update(
+        SESSION_COOKIE_NAME="jobcost_session",
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.environ.get("JOBCOST_SECURE_COOKIES") == "1",
+        PERMANENT_SESSION_LIFETIME=timedelta(days=90),
+    )
+    login_fails = {}  # address -> [timestamps]
+    fails_lock = threading.Lock()
 
     def get_db():
         if "db" not in g:
@@ -161,6 +209,101 @@ def create_app(db_path=None):
     @app.errorhandler(ValidationError)
     def handle_validation(err):
         return jsonify(error=str(err)), 400
+
+    # --- login ---
+    OPEN_ENDPOINTS = {"static", "login_page", "auth_status", "login", "logout"}
+
+    def password_hash():
+        return get_secret(get_db(), "password_hash")
+
+    def logged_in():
+        return session.get("v") is not None and session.get("v") == get_secret(get_db(), "session_version")
+
+    def client_addr():
+        return request.headers.get("X-Real-IP") or request.remote_addr or "?"
+
+    @app.before_request
+    def guard():
+        # Block cross-site form/fetch writes: a browser always sends Origin on these.
+        if request.method in ("POST", "PUT", "DELETE"):
+            origin = request.headers.get("Origin")
+            if origin and urlparse(origin).netloc != request.host:
+                return jsonify(error="cross-site request blocked"), 403
+        if request.endpoint in OPEN_ENDPOINTS:
+            return None
+        if password_hash() is None and not app.config["REQUIRE_PASSWORD"]:
+            return None  # no password set: open, for use on your own computer
+        if logged_in():
+            return None
+        if request.path.startswith("/api/"):
+            return jsonify(error="login required"), 401
+        return redirect("/login")
+
+    @app.get("/login")
+    def login_page():
+        return send_from_directory(app.static_folder, "login.html")
+
+    @app.get("/api/auth")
+    def auth_status():
+        has_pw = password_hash() is not None
+        return jsonify(password_set=has_pw, logged_in=logged_in(),
+                       required=app.config["REQUIRE_PASSWORD"],
+                       open=not has_pw and not app.config["REQUIRE_PASSWORD"])
+
+    def too_many_fails(addr, now):
+        with fails_lock:
+            for a in list(login_fails):
+                login_fails[a] = [t for t in login_fails[a] if now - t < LOGIN_WINDOW]
+                if not login_fails[a]:
+                    del login_fails[a]
+            total = sum(len(v) for v in login_fails.values())
+            return len(login_fails.get(addr, [])) >= LOGIN_MAX_FAILS or total >= LOGIN_MAX_FAILS_TOTAL
+
+    @app.post("/api/login")
+    def login():
+        addr, now = client_addr(), time.time()
+        if too_many_fails(addr, now):
+            return jsonify(error="Too many wrong tries. Wait 15 minutes and try again."), 429
+        pw_hash = password_hash()
+        if pw_hash is None:
+            return jsonify(error="No password has been set yet."), 400
+        password = str((request.get_json(silent=True) or {}).get("password") or "")
+        if not check_password_hash(pw_hash, password):
+            with fails_lock:
+                login_fails.setdefault(addr, []).append(now)
+            return jsonify(error="Wrong password."), 401
+        with fails_lock:
+            login_fails.pop(addr, None)
+        session.clear()
+        session.permanent = True
+        session["v"] = get_secret(get_db(), "session_version")
+        return jsonify(ok=True)
+
+    @app.post("/api/logout")
+    def logout():
+        session.clear()
+        return jsonify(ok=True)
+
+    @app.put("/api/password")
+    def change_password():
+        payload = request.get_json(silent=True) or {}
+        current = password_hash()
+        if current and not check_password_hash(current, str(payload.get("current") or "")):
+            raise ValidationError("Current password is wrong.")
+        new = str(payload.get("new") or "")
+        if payload.get("remove"):
+            if app.config["REQUIRE_PASSWORD"]:
+                raise ValidationError("A password is required when the app is online.")
+            store_password(get_db(), None)
+            session.clear()
+            return jsonify(password_set=False)
+        if len(new) < MIN_PASSWORD:
+            raise ValidationError(f"Use at least {MIN_PASSWORD} characters.")
+        store_password(get_db(), new)
+        session.clear()
+        session.permanent = True
+        session["v"] = get_secret(get_db(), "session_version")  # keep this device signed in
+        return jsonify(password_set=True)
 
     # --- settings helpers ---
     def settings_raw():
@@ -587,6 +730,25 @@ def serve(open_browser=False):
         waitress_serve(app, host="0.0.0.0", port=port, threads=8)
 
 
+def set_password_cli():
+    """`python app.py set-password`: set or reset the login password from the console."""
+    from getpass import getpass
+    pw = getpass(f"New password (at least {MIN_PASSWORD} characters): ")
+    if len(pw) < MIN_PASSWORD:
+        raise SystemExit(f"Too short. Use at least {MIN_PASSWORD} characters.")
+    if getpass("Type it again: ") != pw:
+        raise SystemExit("The two passwords didn't match. Nothing changed.")
+    app = create_app()
+    conn = db.connect(app.config["DB_PATH"])
+    store_password(conn, pw)
+    conn.close()
+    print("Password saved. Other signed-in devices will need to log in again.")
+
+
 if __name__ == "__main__":
     import sys
-    serve(open_browser="--open" in sys.argv[1:])
+    args = sys.argv[1:]
+    if args[:1] == ["set-password"]:
+        set_password_cli()
+    else:
+        serve(open_browser="--open" in args)

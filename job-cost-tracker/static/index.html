@@ -188,6 +188,22 @@
         <button class="primary" type="submit">Save setup</button>
         <p class="muted small center">New rates apply to jobs you log from now on. Past jobs keep the rates they were logged with.</p>
       </form>
+
+      <form class="card" id="pwForm" novalidate>
+        <h3>Login password</h3>
+        <p class="muted small" id="pwStatus"></p>
+        <label class="pw-current hidden">Current password<input type="password" name="current" autocomplete="current-password"></label>
+        <div class="grid-money">
+          <label>New password<input type="password" name="new" autocomplete="new-password" minlength="8"></label>
+          <label>Type it again<input type="password" name="confirm" autocomplete="new-password"></label>
+        </div>
+        <p class="form-error" id="pwError" role="alert"></p>
+        <div class="type-actions">
+          <button class="primary" type="submit" id="pwSave">Set password</button>
+          <button class="danger-link hidden" type="button" id="pwRemove">Remove</button>
+        </div>
+        <button class="secondary hidden" type="button" id="logoutBtn" style="margin-top:10px">Log out of this device</button>
+      </form>
     </section>
   </main>
 

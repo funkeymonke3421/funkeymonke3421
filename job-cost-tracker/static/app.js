@@ -38,6 +38,7 @@ async function api(path, opts = {}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  if (res.status === 401 && path !== "/api/password") { location.href = "/login"; throw new Error("Please log in"); }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -623,6 +624,7 @@ function loadSetup() {
   $("#ratesError").textContent = "";
   renderTypeList();
   updatePerMile();
+  loadAuth();
 }
 ratesForm.addEventListener("input", (e) => {
   e.target.removeAttribute("aria-invalid");
@@ -705,6 +707,50 @@ $("#typeList").addEventListener("submit", async (e) => {
     await refreshTypes();
     toast("Job type saved");
   } catch (ex) { toast(ex.message); }
+});
+
+/* ---------------- login password ---------------- */
+const pwForm = $("#pwForm");
+let auth = { password_set: false, required: false };
+
+async function loadAuth() {
+  try { auth = await api("/api/auth"); } catch { return; }
+  const set = auth.password_set;
+  $("#pwStatus").textContent = set
+    ? "A password is set. You stay logged in on each device for 90 days."
+    : "No password yet. Anyone who can reach this app can open it. Set one before putting it online or opening it on shared Wi-Fi.";
+  $(".pw-current").classList.toggle("hidden", !set);
+  $("#pwSave").textContent = set ? "Change password" : "Set password";
+  $("#pwRemove").classList.toggle("hidden", !set || auth.required);
+  $("#logoutBtn").classList.toggle("hidden", !set);
+  pwForm.reset();
+  $("#pwError").textContent = "";
+}
+
+pwForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const el = pwForm.elements;
+  if (el.new.value.length < 8) { $("#pwError").textContent = "Use at least 8 characters."; return; }
+  if (el.new.value !== el.confirm.value) { $("#pwError").textContent = "The two new passwords don't match."; return; }
+  try {
+    await api("/api/password", { method: "PUT", body: { current: el.current.value, new: el.new.value } });
+    toast("Password saved");
+    loadAuth();
+  } catch (ex) { $("#pwError").textContent = ex.message; }
+});
+$("#pwRemove").addEventListener("click", async () => {
+  const current = pwForm.elements.current.value;
+  if (!current) { $("#pwError").textContent = "Enter your current password to remove it."; return; }
+  if (!confirm("Remove the password? Anyone who can reach the app will be able to open it.")) return;
+  try {
+    await api("/api/password", { method: "PUT", body: { current, remove: true } });
+    toast("Password removed");
+    loadAuth();
+  } catch (ex) { $("#pwError").textContent = ex.message; }
+});
+$("#logoutBtn").addEventListener("click", async () => {
+  await api("/api/logout", { method: "POST" });
+  location.href = "/login";
 });
 
 async function refreshTypes(openId = null) {

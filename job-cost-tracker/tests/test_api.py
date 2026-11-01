@@ -196,3 +196,58 @@ def test_job_type_defaults(client):
     assert client.put("/api/job-types/999", json={"name": "x"}).status_code == 404
     other = client.post("/api/job-types", json={"name": "Roof"}).get_json()
     assert client.put(f"/api/job-types/{other['id']}", json={"name": "wash"}).status_code == 400
+
+
+# ---------- login ----------
+
+def test_open_until_password_set_then_locked(tmp_path):
+    app = create_app(str(tmp_path / "a.db"))
+    c = app.test_client()
+    assert c.get("/api/settings").status_code == 200          # open: no password yet
+    assert c.put("/api/password", json={"new": "short"}).status_code == 400
+    assert c.put("/api/password", json={"new": "hunter2hunter2"}).status_code == 200
+    assert c.get("/api/settings").status_code == 200          # this device stays signed in
+
+    other = app.test_client()                                  # a different device
+    assert other.get("/api/settings").status_code == 401
+    assert other.get("/").status_code == 302
+    assert other.get("/login").status_code == 200
+    assert other.get("/static/app.js").status_code == 200
+    assert other.post("/api/login", json={"password": "nope"}).status_code == 401
+    assert other.post("/api/login", json={"password": "hunter2hunter2"}).status_code == 200
+    assert other.get("/api/settings").status_code == 200
+
+    # changing the password signs out other devices
+    assert c.put("/api/password", json={"current": "hunter2hunter2", "new": "newpassword1"}).status_code == 200
+    assert other.get("/api/settings").status_code == 401
+    assert c.get("/api/settings").status_code == 200
+    # wrong current password can't change or remove it
+    assert c.put("/api/password", json={"current": "x", "remove": True}).status_code == 400
+    assert c.put("/api/password", json={"current": "newpassword1", "remove": True}).status_code == 200
+    assert other.get("/api/settings").status_code == 200       # open again
+
+
+def test_online_mode_requires_password(tmp_path):
+    app = create_app(str(tmp_path / "b.db"), require_password=True)
+    c = app.test_client()
+    assert c.get("/api/jobs").status_code == 401
+    assert c.get("/api/auth").get_json()["required"] is True
+    c.put("/api/password", json={"new": "longenough"})  # blocked: not signed in, no password
+    assert c.get("/api/jobs").status_code == 401
+
+
+def test_login_throttle(tmp_path):
+    app = create_app(str(tmp_path / "c.db"))
+    c = app.test_client()
+    c.put("/api/password", json={"new": "rightpassword"})
+    other = app.test_client()
+    codes = [other.post("/api/login", json={"password": "bad"}).status_code for _ in range(6)]
+    assert codes == [401] * 5 + [429]
+    assert other.post("/api/login", json={"password": "rightpassword"}).status_code == 429
+
+
+def test_cross_site_writes_blocked(client):
+    r = client.post("/api/jobs", json={"date": DAY}, headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+    r = client.post("/api/jobs", json={"date": DAY}, headers={"Origin": "http://localhost"})
+    assert r.status_code == 201
