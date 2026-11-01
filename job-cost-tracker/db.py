@@ -104,3 +104,12 @@ def migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     for i, sql in enumerate(MIGRATIONS[version:], start=version + 1):
         conn.executescript(f"BEGIN; {sql}; PRAGMA user_version = {i}; COMMIT;")
+
+
+def backup_to(conn: sqlite3.Connection, dest_path: str) -> None:
+    """Copy the live database to dest_path safely, even while it's in use."""
+    dest = sqlite3.connect(dest_path)
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()

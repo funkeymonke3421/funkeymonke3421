@@ -29,7 +29,7 @@ function num(v) {
   const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
-const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const plural = (n, w) => `${n} ${n === 1 ? w : w.endsWith("y") ? w.slice(0, -1) + "ies" : w + "s"}`;
 const blank = (n, digits = 2) => (n ? String(+n.toFixed(digits)) : "");
 
 async function api(path, opts = {}) {
@@ -625,6 +625,16 @@ function loadSetup() {
   renderTypeList();
   updatePerMile();
   loadAuth();
+  loadBackups();
+}
+
+async function loadBackups() {
+  try {
+    const b = await api("/api/backups");
+    $("#backupStatus").textContent = b.count
+      ? `The app saves a copy of your data once a day and keeps the last ${b.keep} days. Latest: ${prettyDate(b.latest)} (${plural(b.count, "copy")} saved).`
+      : "The app saves a copy of your data once a day. The first one will appear shortly.";
+  } catch {}
 }
 ratesForm.addEventListener("input", (e) => {
   e.target.removeAttribute("aria-invalid");

@@ -251,3 +251,29 @@ def test_cross_site_writes_blocked(client):
     assert r.status_code == 403
     r = client.post("/api/jobs", json={"date": DAY}, headers={"Origin": "http://localhost"})
     assert r.status_code == 201
+
+
+# ---------- backups ----------
+
+def test_daily_backup_and_prune(tmp_path):
+    import app as appmod
+    data = tmp_path / "data"
+    bdir = data / "backups"
+    bdir.mkdir(parents=True)
+    for i in range(1, 35):  # 34 old backups
+        (bdir / f"jobs-2025-01-{i:02d}.db").write_bytes(b"old")
+    app = create_app(str(data / "jobs.db"))
+    files = sorted(p.name for p in bdir.glob("jobs-*.db"))
+    assert len(files) == appmod.BACKUPS_KEPT
+    from datetime import date
+    today = bdir / f"jobs-{date.today()}.db"
+    assert today.exists() and today.read_bytes()[:16] == b"SQLite format 3\x00"
+    info = app.test_client().get("/api/backups").get_json()
+    assert info["count"] == appmod.BACKUPS_KEPT and info["latest"] == str(date.today())
+
+
+def test_backup_download(client):
+    post(client, name="x", other=1)
+    r = client.get("/api/backup.db")
+    assert r.status_code == 200 and r.data[:16] == b"SQLite format 3\x00"
+    assert "attachment" in r.headers["Content-Disposition"]

@@ -189,6 +189,13 @@
         <p class="muted small center">New rates apply to jobs you log from now on. Past jobs keep the rates they were logged with.</p>
       </form>
 
+      <div class="card">
+        <h3>Backups</h3>
+        <p class="muted small" id="backupStatus"></p>
+        <a class="secondary block" href="/api/backup.db" download>Download a backup now</a>
+        <p class="muted small">To restore one, stop the app, rename the backup file to <code>jobs.db</code> and put it in the <code>data</code> folder, replacing the old one.</p>
+      </div>
+
       <form class="card" id="pwForm" novalidate>
         <h3>Login password</h3>
         <p class="muted small" id="pwStatus"></p>

@@ -7,10 +7,13 @@ Data: ./data/jobs.db       (override with JOBCOST_DB=/path/to/file.db)
 import csv
 import io
 import os
+import logging
 import secrets
+import tempfile
 import threading
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from urllib.parse import urlparse
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -63,6 +66,7 @@ MIN_PASSWORD = 8
 LOGIN_WINDOW = 15 * 60       # seconds
 LOGIN_MAX_FAILS = 5          # per address per window
 LOGIN_MAX_FAILS_TOTAL = 50   # across all addresses per window
+BACKUPS_KEPT = 30            # daily backup files to keep
 MAX_MINUTES = 24 * 60
 COST_KEYS = ("chem", "gas", "labor", "equipment", "ad_spend", "overhead", "other")
 SUM_KEYS = ("revenue", *COST_KEYS, "total_cost", "profit")
@@ -195,6 +199,43 @@ def create_app(db_path=None, require_password=None):
     login_fails = {}  # address -> [timestamps]
     fails_lock = threading.Lock()
 
+    # --- automatic daily backups ---
+    backup_dir = Path(app.config["DB_PATH"]).parent / "backups"
+    backup_state = {"day": None}
+    backup_lock = threading.Lock()
+
+    def list_backups():
+        return sorted(backup_dir.glob("jobs-????-??-??.db")) if backup_dir.exists() else []
+
+    def daily_backup():
+        """Once per day, save a dated copy of the data and prune old copies."""
+        if app.config["DB_PATH"] == ":memory:":
+            return
+        today = date.today().isoformat()
+        if backup_state["day"] == today:
+            return
+        with backup_lock:
+            if backup_state["day"] == today:
+                return
+            backup_state["day"] = today
+            try:
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                dest = backup_dir / f"jobs-{today}.db"
+                if not dest.exists():
+                    tmp = dest.with_suffix(".tmp")
+                    src = db.connect(app.config["DB_PATH"])
+                    try:
+                        db.backup_to(src, str(tmp))
+                    finally:
+                        src.close()
+                    os.replace(tmp, dest)
+                for old in list_backups()[:-BACKUPS_KEPT]:
+                    old.unlink()
+            except OSError:
+                logging.exception("daily backup failed")
+
+    daily_backup()
+
     def get_db():
         if "db" not in g:
             g.db = db.connect(app.config["DB_PATH"])
@@ -224,6 +265,7 @@ def create_app(db_path=None, require_password=None):
 
     @app.before_request
     def guard():
+        daily_backup()
         # Block cross-site form/fetch writes: a browser always sends Origin on these.
         if request.method in ("POST", "PUT", "DELETE"):
             origin = request.headers.get("Origin")
@@ -665,6 +707,26 @@ def create_app(db_path=None, require_password=None):
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [(k, str(v)) for k, v in updates.items()])
         return jsonify(settings_api())
+
+    # --- backups ---
+    @app.get("/api/backups")
+    def backups_info():
+        files = list_backups()
+        latest = files[-1].stem.removeprefix("jobs-") if files else None
+        return jsonify(count=len(files), latest=latest, keep=BACKUPS_KEPT,
+                       folder=str(backup_dir))
+
+    @app.get("/api/backup.db")
+    def download_backup():
+        fd, tmp = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            db.backup_to(get_db(), tmp)
+            data = Path(tmp).read_bytes()
+        finally:
+            os.unlink(tmp)
+        return Response(data, mimetype="application/octet-stream", headers={
+            "Content-Disposition": f"attachment; filename=jobcost-backup-{date.today()}.db"})
 
     # --- export ---
     @app.get("/api/export.csv")
