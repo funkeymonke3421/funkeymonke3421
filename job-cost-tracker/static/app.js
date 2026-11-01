@@ -201,8 +201,79 @@ form.addEventListener("input", (e) => {
 $$(".chip").forEach((c) => c.addEventListener("click", () => {
   const add = +c.dataset.add;
   setMinutes(add ? formMinutes() + add : 0);
+  f("hours").classList.remove("autofilled");
+  f("mins").classList.remove("autofilled");
   updateLive();
 }));
+
+/* ---------------- job timer ----------------
+   The start time is kept in this browser's storage, so the timer keeps
+   counting if you lock your phone, switch apps or close the page. */
+const TIMER_KEY = "jobcost.timerStart";
+const store = {
+  get() { try { return +localStorage.getItem(TIMER_KEY) || null; } catch { return null; } },
+  set(v) { try { v ? localStorage.setItem(TIMER_KEY, String(v)) : localStorage.removeItem(TIMER_KEY); } catch {} },
+};
+const storageOk = (() => {
+  try { localStorage.setItem("jobcost.t", "1"); localStorage.removeItem("jobcost.t"); return true; } catch { return false; }
+})();
+let timerStartMem = null;  // fallback when storage is blocked (private mode)
+let timerTick = null;
+const timerStart = () => (storageOk ? store.get() : timerStartMem);
+
+function clock(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function renderTimer() {
+  const start = timerStart();
+  const btn = $("#timerBtn"), run = $("#timerRun");
+  btn.classList.toggle("running", !!start);
+  if (start) {
+    const elapsed = Date.now() - start;
+    $("#timerText").textContent = clock(elapsed);
+    btn.setAttribute("aria-label", `Stop timer, ${clock(elapsed)} elapsed`);
+    const at = new Date(start).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    run.innerHTML = `Started ${at}. Tap <b>stop</b> when you finish to fill in the time.`;
+    run.classList.remove("hidden");
+    document.title = `⏱ ${clock(elapsed).slice(0, -3)} · Job Cost`;
+    if (!timerTick) timerTick = setInterval(renderTimer, 1000);
+  } else {
+    $("#timerText").textContent = "Start timer";
+    btn.removeAttribute("aria-label");
+    run.classList.add("hidden");
+    document.title = "Job Cost Tracker";
+    clearInterval(timerTick);
+    timerTick = null;
+  }
+}
+
+function stopTimer() {
+  const start = timerStart();
+  if (!start) return;
+  const minutes = Math.max(1, Math.round((Date.now() - start) / 60000));
+  store.set(null);
+  timerStartMem = null;
+  setMinutes(Math.min(minutes, 1440));
+  f("hours").classList.remove("autofilled");
+  f("mins").classList.remove("autofilled");
+  state.auto.minutes = NaN;  // timed value wins over type defaults
+  renderTimer();
+  updateLive();
+  toast(`Time set to ${hm(Math.min(minutes, 1440))}`);
+}
+
+$("#timerBtn").addEventListener("click", () => {
+  if (timerStart()) return stopTimer();
+  const now = Date.now();
+  store.set(now);
+  timerStartMem = now;
+  renderTimer();
+});
+window.addEventListener("storage", (e) => { if (e.key === TIMER_KEY) renderTimer(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) renderTimer(); });
 
 function resetForm(keepDate = true) {
   const date = f("date").value;
@@ -241,6 +312,7 @@ function validate() {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (timerStart()) stopTimer();  // saving while timing uses the timed minutes
   const err = validate();
   if (err) { $("#formError").textContent = err; return; }
 
@@ -648,5 +720,6 @@ async function refreshTypes(openId = null) {
     [state.settings, state.types] = await Promise.all([api("/api/settings"), api("/api/job-types")]);
   } catch (ex) { toast(ex.message); }
   resetForm();
+  renderTimer();
   loadTodayStrip();
 })();

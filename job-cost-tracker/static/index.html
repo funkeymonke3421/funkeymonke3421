@@ -43,7 +43,13 @@
         </div>
 
         <div class="time-block">
-          <span class="label">Time on job</span>
+          <div class="time-head">
+            <span class="label">Time on job</span>
+            <button type="button" class="timer-btn" id="timerBtn" aria-live="polite">
+              <span class="dot"></span><span id="timerText">Start timer</span>
+            </button>
+          </div>
+          <div class="timer-run hidden" id="timerRun"></div>
           <div class="time-row">
             <div class="time-inputs">
               <input type="number" inputmode="numeric" min="0" max="24" name="hours" placeholder="0" aria-label="Hours"><span>h</span>
