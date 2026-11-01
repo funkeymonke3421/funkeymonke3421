@@ -32,16 +32,20 @@ Use at least 8 characters. Nothing shows on screen while you type; that's normal
 ## 4. Create the web app
 1. Open the **Web** tab and click **Add a new web app** → **Next**.
 2. Choose **Manual configuration** (not "Flask"), then **Python 3.12**, then **Next**.
-3. On the page that opens, under **Code**, click the **WSGI configuration file** link. Delete everything in it and paste:
+3. On the page that opens, under **Code**, click the **WSGI configuration file** link. Delete everything in it and paste the code below. Replace `YOURNAME` with your username and keep the quotes. Then click **Save**.
 
-   ```python
-   import sys
-   path = "/home/YOURNAME/funkeymonke3421/job-cost-tracker"
-   if path not in sys.path:
-       sys.path.insert(0, path)
-   from wsgi import application
-   ```
-   Then click **Save**.
+```python
+import sys
+
+path = "/home/YOURNAME/funkeymonke3421/job-cost-tracker"
+if path not in sys.path:
+    sys.path.insert(0, path)
+
+from wsgi import application
+```
+
+> Every line must start at the left edge, except `sys.path.insert(...)`, which starts with exactly 4 spaces. If you get a syntax error, check for extra spaces at the start of lines, or curly quotes (`“ ”`) where there should be plain `"`.
+
 4. Back on the **Web** tab, scroll to **Security** and turn on **Force HTTPS**.
 5. Click the green **Reload** button at the top.
 
