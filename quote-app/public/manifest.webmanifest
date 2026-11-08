@@ -1,0 +1,9 @@
+{
+  "name": "Shine Permanent Lighting — Quote",
+  "short_name": "Shine Quote",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#011947",
+  "theme_color": "#011947",
+  "icons": [{ "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}
