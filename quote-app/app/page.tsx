@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Slideshow, { type Photo } from "./Slideshow";
 
 type Section = {
   id: string;
@@ -97,6 +98,10 @@ export default function Home() {
   ]);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [presenting, setPresenting] = useState(false);
+  const [slides, setSlides] = useState(false);
+  // Mockup photos live in memory only — they're gone on refresh, by design.
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -160,8 +165,35 @@ export default function Home() {
     setSections((prev) => [...prev, { id: uid(), name, feet: "", rate: "" }]);
     setShowPresets(false);
   };
+  const addPhotos = (files: FileList | null) => {
+    if (!files) return;
+    const next = Array.from(files)
+      .filter((f) => f.type.startsWith("image/"))
+      .map((f) => ({ id: uid(), url: URL.createObjectURL(f), name: f.name }));
+    setPhotos((prev) => [...prev, ...next]);
+    if (fileInput.current) fileInput.current.value = ""; // allow re-picking the same photo
+  };
+  const removePhoto = (id: string) =>
+    setPhotos((prev) => {
+      const gone = prev.find((p) => p.id === id);
+      if (gone) URL.revokeObjectURL(gone.url);
+      return prev.filter((p) => p.id !== id);
+    });
+  const movePhoto = (id: string, dir: -1 | 1) =>
+    setPhotos((prev) => {
+      const i = prev.findIndex((p) => p.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const copy = [...prev];
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+      return copy;
+    });
+  const startPresentation = () => (photos.length ? setSlides(true) : setPresenting(true));
+
   const newQuote = () => {
-    if (!confirm("Start a new quote? This clears the client and sections.")) return;
+    if (!confirm("Start a new quote? This clears the client, sections and mockups.")) return;
+    photos.forEach((p) => URL.revokeObjectURL(p.url));
+    setPhotos([]);
     setClient("");
     setSections([{ id: uid(), name: "Front of House", feet: "", rate: "" }]);
   };
@@ -169,14 +201,41 @@ export default function Home() {
   const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const visibleLines = lines.filter((l) => l.feetN > 0);
 
+  if (slides) {
+    return (
+      <Slideshow
+        photos={photos}
+        client={client}
+        onClose={() => setSlides(false)}
+        onDone={() => {
+          setSlides(false);
+          setPresenting(true);
+        }}
+      />
+    );
+  }
+
   if (presenting) {
     return (
       <main className="present">
         <div className="present-bar">
           <span className="muted">{today}</span>
-          <button className="ghost" onClick={() => setPresenting(false)}>
-            Edit
-          </button>
+          <div className="bar-actions">
+            {photos.length > 0 && (
+              <button
+                className="ghost"
+                onClick={() => {
+                  setPresenting(false);
+                  setSlides(true);
+                }}
+              >
+                ‹ Mockups
+              </button>
+            )}
+            <button className="ghost" onClick={() => setPresenting(false)}>
+              Edit
+            </button>
+          </div>
         </div>
 
         <img src="/logo.png" alt="Shine Permanent Lighting" className="logo logo-lg" />
@@ -259,6 +318,45 @@ export default function Home() {
         </label>
       </section>
 
+      <h2 className="section-title">
+        Mockups <span className="title-note">{photos.length ? `${photos.length} · shown before the price` : "optional"}</span>
+      </h2>
+      <section className="card mockups">
+        <div className="thumbs">
+          {photos.map((p, i) => (
+            <div className="thumb" key={p.id}>
+              <img src={p.url} alt={`Mockup ${i + 1}`} />
+              <span className="thumb-num">{i + 1}</span>
+              <button className="thumb-x" onClick={() => removePhoto(p.id)} aria-label={`Remove mockup ${i + 1}`}>
+                ×
+              </button>
+              {photos.length > 1 && (
+                <div className="thumb-move">
+                  <button onClick={() => movePhoto(p.id, -1)} disabled={i === 0} aria-label="Move earlier">
+                    ‹
+                  </button>
+                  <button onClick={() => movePhoto(p.id, 1)} disabled={i === photos.length - 1} aria-label="Move later">
+                    ›
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          <button className="thumb thumb-add" onClick={() => fileInput.current?.click()}>
+            <span>+</span>
+            <small>Add photos</small>
+          </button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => addPhotos(e.target.files)}
+        />
+      </section>
+
       <h2 className="section-title">Sections</h2>
 
       {lines.map((l) => (
@@ -327,8 +425,8 @@ export default function Home() {
       <div className="spacer" />
 
       <div className="bottom-bar">
-        <button className="primary" onClick={() => setPresenting(true)} disabled={total <= 0}>
-          ✦ Show Client · {money(total, false)}
+        <button className="primary" onClick={startPresentation} disabled={total <= 0}>
+          ✦ {photos.length ? "Start Presentation" : "Show Client"} · {money(total, false)}
         </button>
       </div>
     </main>
